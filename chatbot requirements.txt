@@ -2,9 +2,11 @@ streamlit
 langchain
 sentence-transformers
 faiss-cpu
-pypdf
+pdfplumber
 transformers
 torch
+
+
 
 
 
