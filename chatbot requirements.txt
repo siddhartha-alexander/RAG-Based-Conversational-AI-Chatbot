@@ -1,9 +1,10 @@
 streamlit
+langchain
+sentence-transformers
+faiss-cpu
 pypdf
 transformers
 torch
-langchain
-faiss-cpu
-sentence-transformers
+
 
 
