@@ -3,7 +3,7 @@ import tempfile
 from typing import List
 
 import streamlit as st
-from pypdf import PdfReader
+from PyPDF2 import PdfReader
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 from langchain.embeddings import HuggingFaceEmbeddings
@@ -183,3 +183,4 @@ if query:
 st.markdown("---")
 st.markdown("**Developed by Damala Siddhartha Alexander**")
 st.caption("If you want FAISS persistence, different embeddings, or OpenAI support, tell me and I'll add it.")
+
