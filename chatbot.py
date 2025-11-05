@@ -1,9 +1,14 @@
+# -----------------------------
+# 💬 RAG-BASED CHATBOT (STREAMLIT)
+# Developed by Damala Siddhartha Alexander
+# -----------------------------
+
 import os
 import tempfile
 from typing import List
 
 import streamlit as st
-from pypdf import PdfReader
+import pdfplumber  # ✅ Stable for Streamlit Cloud
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 from langchain.embeddings import HuggingFaceEmbeddings
@@ -13,23 +18,25 @@ from langchain.schema import Document
 
 # ---------- CONFIG ----------
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"   # HuggingFace sentence-transformers
-GEN_MODEL = "google/flan-t5-base"       # generation model (CPU friendly-ish)
+GEN_MODEL = "google/flan-t5-base"       # generation model
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 TOP_K = 4
 
 # ---------- UTILITIES ----------
 def load_text_from_pdf(path: str) -> str:
-    reader = PdfReader("chatbot.py")
-    pages = []
-    for page in reader.pages:
-        t = page.extract_text()
-        if t:
-            pages.append(t)
-    return "\n\n".join(pages)
+    """Extract text from PDF using pdfplumber (safe for Streamlit Cloud)."""
+    text = ""
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+    return text
 
 
 def load_documents_from_folder(folder: str, exts=("pdf", "txt")) -> List[Document]:
+    """Load all supported files (PDF/TXT) from a folder."""
     docs = []
     for root, _, files in os.walk(folder):
         for fname in files:
@@ -45,12 +52,12 @@ def load_documents_from_folder(folder: str, exts=("pdf", "txt")) -> List[Documen
                         text = f.read()
                 docs.append(Document(page_content=text, metadata={"source": full}))
             except Exception as e:
-                # don't crash the app for one bad file
                 st.warning(f"Failed to load {full}: {e}")
     return docs
 
 
 def split_documents(docs: List[Document], chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
+    """Split documents into smaller chunks for embedding."""
     splitter = CharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap)
     out = []
     for d in docs:
@@ -65,9 +72,7 @@ def split_documents(docs: List[Document], chunk_size=CHUNK_SIZE, overlap=CHUNK_O
 # ---------- VECTORSTORE & EMBEDDINGS (cached) ----------
 @st.cache_resource(show_spinner=False)
 def build_vectorstore(documents: List[Document]):
-    """
-    Build FAISS index from given documents. Cached by Streamlit so repeated runs are fast.
-    """
+    """Build FAISS index from given documents."""
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
     splitted = split_documents(documents)
     texts = [d.page_content for d in splitted]
@@ -79,6 +84,7 @@ def build_vectorstore(documents: List[Document]):
 # ---------- GENERATOR (cached) ----------
 @st.cache_resource(show_spinner=False)
 def load_generator():
+    """Load text generation model (Flan-T5)."""
     tokenizer = AutoTokenizer.from_pretrained(GEN_MODEL)
     model = AutoModelForSeq2SeqLM.from_pretrained(GEN_MODEL)
     gen = pipeline("text2text-generation", model=model, tokenizer=tokenizer)
@@ -86,6 +92,7 @@ def load_generator():
 
 
 def answer_query(store: FAISS, query: str, generator, top_k: int = TOP_K):
+    """Retrieve top chunks and generate an answer."""
     results = store.similarity_search(query, k=top_k)
     if not results:
         return "No relevant documents found.", []
@@ -104,17 +111,17 @@ def answer_query(store: FAISS, query: str, generator, top_k: int = TOP_K):
 
 
 # ---------- STREAMLIT UI ----------
-st.set_page_config(page_title="RAG Chatbot", page_icon="🤖")
+st.set_page_config(page_title="RAG Chatbot by Damala", page_icon="🤖")
 st.title("💬 RAG-based Chatbot (Streamlit)")
-st.caption("Upload PDF/TXT docs, build a FAISS index, and ask questions (HuggingFace embeddings + Flan-T5).")
+st.caption("Upload PDF/TXT docs, build FAISS index, and ask questions (HuggingFace embeddings + Flan-T5).")
 
-# Sidebar: choose upload or folder
-st.sidebar.header("Documents / Index")
+# Sidebar for documents
+st.sidebar.header("📂 Document Options")
 use_upload = st.sidebar.checkbox("Upload documents (recommended)", value=True)
 
 documents = []
 if use_upload:
-    uploaded = st.sidebar.file_uploader("Upload PDF/TXT (multiple)", type=["pdf", "txt"], accept_multiple_files=True)
+    uploaded = st.sidebar.file_uploader("Upload PDF/TXT files", type=["pdf", "txt"], accept_multiple_files=True)
     if uploaded:
         tmpdir = tempfile.TemporaryDirectory()
         for uf in uploaded:
@@ -128,7 +135,7 @@ if use_upload:
                     text = fh.read()
             documents.append(Document(page_content=text, metadata={"source": uf.name}))
 else:
-    folder = st.sidebar.text_input("Local folder path", value="docs")
+    folder = st.sidebar.text_input("Enter local folder path", value="docs")
     if st.sidebar.button("Load folder"):
         if os.path.exists(folder):
             documents = load_documents_from_folder(folder)
@@ -138,23 +145,23 @@ else:
 
 # Build index
 if documents:
-    st.info(f"{len(documents)} document(s) selected — building vectorstore (first time may take a while).")
+    st.info(f"{len(documents)} document(s) selected — building vectorstore (first time may take a while)...")
     with st.spinner("Building embeddings and FAISS index..."):
         store, embeddings = build_vectorstore(documents)
-    st.success("Vectorstore ready.")
+    st.success("✅ Vectorstore ready.")
 else:
-    st.info("No documents loaded yet. Upload files or load a local folder to build the index.")
+    st.info("No documents loaded yet. Upload files or load a folder to start.")
     store = None
 
-# Query input & generator control
-st.subheader("Ask a question")
-query = st.text_input("Enter question and press Enter")
+# Query input & generation
+st.subheader("💭 Ask a question")
+query = st.text_input("Type your question and press Enter")
 
-if st.button("Load generation model (Flan-T5)"):
-    with st.spinner("Loading generator..."):
+if st.button("Load Generation Model (Flan-T5)"):
+    with st.spinner("Loading model... (takes time only once)"):
         _gen = load_generator()
     st.session_state["gen_loaded"] = True
-    st.success("Generator loaded.")
+    st.success("Model loaded successfully.")
 
 # Autoload generator if cached
 generator = None
@@ -163,23 +170,24 @@ if st.session_state.get("gen_loaded", False):
 
 if query:
     if store is None:
-        st.warning("No index available. Upload documents and build the vectorstore first.")
+        st.warning("⚠️ Please upload documents and build the index first.")
     else:
         if generator is None:
-            with st.spinner("Loading generator (first-time may be slow)..."):
+            with st.spinner("Loading model..."):
                 generator = load_generator()
             st.session_state["gen_loaded"] = True
 
         with st.spinner("Retrieving and generating answer..."):
             ans, sources = answer_query(store, query, generator)
-        st.markdown("**Answer:**")
+
+        st.markdown("### 🧠 Answer:")
         st.write(ans)
 
-        st.markdown("**Retrieved sources:**")
+        st.markdown("### 📄 Retrieved Sources:")
         for i, s in enumerate(sources):
             st.write(f"{i+1}. {s}")
 
 # ---------- FOOTER ----------
 st.markdown("---")
 st.markdown("**Developed by Damala Siddhartha Alexander**")
-st.caption("If you want FAISS persistence, different embeddings, or OpenAI support, tell me and I'll add it.")
+st.caption("RAG-based Conversational AI | Built with LangChain, FAISS, and Flan-T5")
